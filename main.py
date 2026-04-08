@@ -33,30 +33,6 @@ def scrape():
     return response_json
 
 
-def send_mail(header, content):
-    # Setup and send mail
-    receiver_email = os.getenv("receiver_email")
-    port = 465  # For SSL
-    smtp_server = "smtp.gmail.com"
-    # use environment variables for email login
-    sender_email = os.getenv("sender_email")
-    password = os.getenv("password")
-    message = f"""\
-Subject: {header}
-
-{content}"""
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-
-        print("Logging in!", get_time())
-        server.login(sender_email, password)
-
-        print("Sending mail", get_time())
-        server.sendmail(sender_email, receiver_email, message.encode("utf-8"))
-
-        print("Mail sent!", get_time())
-        print()
-
 """
 We want 
    - pickupLocationName
@@ -73,11 +49,6 @@ We want
 
 data from the json. 
 """
-
-
-def main():
-    # Load all the environment variables and override in case there are old variables i dont want to keep
-    load_dotenv(override=True)
 
 
 def parse(response):
@@ -166,8 +137,44 @@ def parse(response):
         print("Sent", counter, "mails.")
 
 
+def main():
+    # Load all the environment variables and override in case there are old variables i dont want to keep
+    load_dotenv(override=True)
+    response_json = scrape()
+    parse(response_json)
+
+
 def get_time():
     # Helper function for getting the current time in a nice format
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")
     return current_time
+
+
+def send_mail(header, content):
+    # Setup and send mail
+    receiver_email = os.getenv("receiver_email")
+    port = 465  # For SSL
+    smtp_server = "smtp.gmail.com"
+    # use environment variables for email login
+    sender_email = os.getenv("sender_email")
+    password = os.getenv("password")
+    message = f"""\
+Subject: {header}
+
+{content}"""
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+
+        print("Logging in!", get_time())
+        server.login(sender_email, password)
+
+        print("Sending mail", get_time())
+        server.sendmail(sender_email, receiver_email, message.encode("utf-8"))
+
+        print("Mail sent!", get_time())
+        print()
+
+
+if __name__ == "__main__":
+    main()
