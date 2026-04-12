@@ -4,6 +4,10 @@ import smtplib
 import ssl
 from datetime import datetime
 from dotenv import load_dotenv
+import Path
+
+# CNOSTS
+PROJECT_DIR = Path(__file__).resolve().parent
 
 
 def scrape():
@@ -52,6 +56,46 @@ data from the json.
 
 
 def parse(response):
+    parsed_objects = []
+
+    # Go through all the received adverts and get the data we want and send email for unsent
+    for i, item in enumerate(response):
+        # Routes is a list including duplicates of all ads with the same origin and goal, but we only care for unique ads.
+        # Routes contains all the relevant data
+        routes = item["routes"][0]
+
+        availableAt = routes["availableAt"]
+        latestReturn = routes["latestReturn"]
+        expireTime = routes["expireTime"]
+
+        ad_data = {
+            # Origin and destination names
+            "returnLocationName": item["returnLocationName"] ,
+            "pickupLocationName": item["pickupLocationName"],
+
+            "routes": routes,
+
+            # Get all the relevant data from the json that we want to include in our mail
+            "ad_id": routes["id"],
+            "distance": routes["distance"],
+            "originalDistance": routes["originalDistance"],
+            "travelTime": routes["travelTime"],
+            "originalTravelTime": routes["originalTravelTime"],
+
+            "carModel": routes["carModel"],
+
+            # date from source is on ISO-format "YYYY-MM-DDTHH:mm:ss"
+            "availableAtfrmt": datetime.fromisoformat(availableAt).strftime("%d/%m"),
+            "latestReturnfrmt": datetime.fromisoformat(latestReturn).strftime("%d/%m"),
+            "expireTimefrmt": datetime.fromisoformat(expireTime).strftime("%H:%M %d/%m")
+        }
+
+        parsed_objects.append(ad_data)
+
+    return parsed_objects
+
+
+def send_mails(objects):
     # Read all the previously parsed ad ids
     with open("ids.txt", "r") as file:
         ids = file.readlines()
@@ -64,38 +108,23 @@ def parse(response):
     interested_pickup_locs = ["eslöv", "helsingborg", "hässleholm", "lund", "malmö"]
     uninterested_return_locs = ["eslöv", "helsingborg", "hässleholm", "lund", "malmö", "ystad", "kristianstad"]
 
-    # TODO REMOVE temp variables
-    sent1, sent2 = False, False
-
-    # Mail counter
+    # keep track of no. sent emails
     counter = 0
+    for ad in objects:
+        ad_id = ad["ad_id"]
+        distance = ad["distance"]
+        originalDistance = ad["originalDistance"]
+        travelTime = ad["travelTime"]
+        originalTravelTime = ad["originalTravelTime"]
 
-    # Go through all the received adverts and get the data we want and send email for unsent
-    for i, item in enumerate(response):
-        # TODO make helper functions to improve readability
-        # Origin and destination names
-        pickupLocationName = item["pickupLocationName"]
-        returnLocationName = item["returnLocationName"]
+        carModel = ad["carModel"]
+        availableAtfrmt = ad["availableAtfrmt"]
+        latestReturnfrmt = ad["latestReturnfrmt"]
+        expireTimefrmt = ad["expireTimefrmt"]
+        returnLocationName = ad["returnLocationName"]
+        pickupLocationName = ad["pickupLocationName"]
 
-        # Routes is a list including duplicates of all ads with the same origin and goal, but we only care for unique ads.
-        # Routes contains all the relevant data
-        routes = item["routes"][0]
-
-        # Get all the relevant data from the json that we want to include in our mail
-        ad_id = routes["id"]
-        distance = routes["distance"]
-        originalDistance = routes["originalDistance"]
-        travelTime = routes["travelTime"]
-        originalTravelTime = routes["originalTravelTime"]
-        availableAt = routes["availableAt"]
-        latestReturn = routes["latestReturn"]
-        expireTime = routes["expireTime"]
-        carModel = routes["carModel"]
-
-        # date from source is on ISO-format "YYYY-MM-DDTHH:mm:ss"
-        availableAtfrmt = datetime.fromisoformat(availableAt).strftime("%d/%m")
-        latestReturnfrmt = datetime.fromisoformat(latestReturn).strftime("%d/%m")
-        expireTimefrmt = datetime.fromisoformat(expireTime).strftime("%H:%M %d/%m")
+        routes = ad["routes"]
 
         # Header/subject for generic car ad
         default_header = f"""Ny bil från {pickupLocationName.split()[0]} till {returnLocationName.split()[0]}  {latestReturnfrmt}! Boka senast {expireTimefrmt}."""
@@ -113,18 +142,19 @@ def parse(response):
             continue
 
         # Check if the specified locations exist in the posted pickup/return locations. Use any to check for any words in the list are present in the posted string.
-        if (any(loc in pickupLocationName.lower() for loc in interested_pickup_locs_delivery) and any(loc in  returnLocationName.lower() for loc in interested_return_locs_delivery) ) and not sent1: # TODO REMOVE TEMP
+        if (any(loc in pickupLocationName.lower() for loc in interested_pickup_locs_delivery) and any(
+                loc in returnLocationName.lower() for loc in
+                interested_return_locs_delivery)):
             # Send email with delivery header
             send_mail(delivery_header, email)
             counter += 1
-            sent1 = True  # TODO REMOVE
 
         # Dont allow where pickup and return is in the same region
-        elif (any(loc in pickupLocationName.lower() for loc in interested_pickup_locs) and not any(loc in returnLocationName.lower() for loc in uninterested_return_locs)) and not sent2:  # TODO REMOVE TEMp
+        elif (any(loc in pickupLocationName.lower() for loc in interested_pickup_locs) and not any(
+                loc in returnLocationName.lower() for loc in uninterested_return_locs)):
             # Send email with generic header
             send_mail(default_header, email)
             counter += 1
-            sent2 = True # TODO REMOVE
 
         # add parsed id to file
         with open("ids.txt", "a+") as file:
