@@ -4,7 +4,7 @@ import smtplib
 import ssl
 from datetime import datetime
 from dotenv import load_dotenv
-import Path
+from pathlib import Path
 
 # CNOSTS
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -97,7 +97,7 @@ def parse(response):
 
 def send_mails(objects):
     # Read all the previously parsed ad ids
-    with open("ids.txt", "r") as file:
+    with open(f"{PROJECT_DIR}/ids.txt", "r") as file:
         ids = file.readlines()
 
     # _delivery variables are for when there is a delivery to be done
@@ -123,8 +123,6 @@ def send_mails(objects):
         expireTimefrmt = ad["expireTimefrmt"]
         returnLocationName = ad["returnLocationName"]
         pickupLocationName = ad["pickupLocationName"]
-
-        routes = ad["routes"]
 
         # Header/subject for generic car ad
         default_header = f"""Ny bil från {pickupLocationName.split()[0]} till {returnLocationName.split()[0]}  {latestReturnfrmt}! Boka senast {expireTimefrmt}."""
@@ -156,8 +154,10 @@ def send_mails(objects):
             send_mail(default_header, email)
             counter += 1
 
+        else:
+            print("Uninteresting ad, skipping...")
         # add parsed id to file
-        with open("ids.txt", "a+") as file:
+        with open(f"{PROJECT_DIR}/ids.txt", "a+") as file:
             file.write(str(ad_id) + "\n")
 
     # Output results
@@ -171,7 +171,8 @@ def main():
     # Load all the environment variables and override in case there are old variables i dont want to keep
     load_dotenv(override=True)
     response_json = scrape()
-    parse(response_json)
+    parsed_data = parse(response_json)
+    send_mails(parsed_data)
 
 
 def get_time():
