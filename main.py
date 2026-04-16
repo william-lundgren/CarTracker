@@ -1,3 +1,4 @@
+import json
 import requests
 import os
 import smtplib
@@ -5,61 +6,17 @@ import ssl
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
-
-# CNOSTS
-PROJECT_DIR = Path(__file__).resolve().parent
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# me == my email address
-# you == recipient's email address
-me = "my@email.com"
-you = "your@email.com"
-
-# Create message container - the correct MIME type is multipart/alternative.
-msg = MIMEMultipart('alternative')
-msg['Subject'] = "Link"
-msg['From'] = me
-msg['To'] = you
-
-# Create the body of the message (a plain-text and an HTML version).
-text = "Hi!\nHow are you?\nHere is the link you wanted:\nhttp://www.python.org"
-html = """\
-<html>
-  <head></head>
-  <body>
-    <p>Hi!<br>
-       How are you?<br>
-       Here is the <a href="http://www.python.org">link</a> you wanted.
-    </p>
-  </body>
-</html>
-"""
-
-# Record the MIME types of both parts - text/plain and text/html.
-part1 = MIMEText(text, 'plain')
-part2 = MIMEText(html, 'html')
-
-# Attach parts into message container.
-# According to RFC 2046, the last part of a multipart message, in this case
-# the HTML message, is best and preferred.
-msg.attach(part1)
-msg.attach(part2)
-
-# Send the message via local SMTP server.
-s = smtplib.SMTP('localhost')
-# sendmail function takes 3 arguments: sender's address, recipient's address
-# and message to send - here it is sent as one string.
-s.sendmail(me, you, msg.as_string())
-
-
-
+# CNOSTS
+PROJECT_DIR = Path(__file__).resolve().parent
 
 
 def scrape():
     url = "https://www.hertzfreerider.se/api/transport-routes"
 
-    querystring = {"country":"SWEDEN"}
+    querystring = {"country": "SWEDEN"}
 
     payload = ""
 
@@ -116,7 +73,7 @@ def parse(response):
 
         ad_data = {
             # Origin and destination names
-            "returnLocationName": item["returnLocationName"] ,
+            "returnLocationName": item["returnLocationName"],
             "pickupLocationName": item["pickupLocationName"],
 
             "routes": routes,
@@ -142,6 +99,12 @@ def parse(response):
 
 
 def send_mails(objects):
+    """
+    Reads all the dicts from the list of dict objects
+    :param objects:
+    :return:
+    """
+
     # Read all the previously parsed ad ids
     with open(f"{PROJECT_DIR}/ids.txt", "r") as file:
         ids = file.readlines()
@@ -158,50 +121,40 @@ def send_mails(objects):
     counter = 0
     for ad in objects:
         ad_id = ad["ad_id"]
-        distance = ad["distance"]
-        originalDistance = ad["originalDistance"]
-        travelTime = ad["travelTime"]
-        originalTravelTime = ad["originalTravelTime"]
 
-        carModel = ad["carModel"]
-        availableAtfrmt = ad["availableAtfrmt"]
-        latestReturnfrmt = ad["latestReturnfrmt"]
-        expireTimefrmt = ad["expireTimefrmt"]
         returnLocationName = ad["returnLocationName"]
         pickupLocationName = ad["pickupLocationName"]
 
-        # Header/subject for generic car ad
-        default_header = f"""Ny bil från {pickupLocationName.split()[0]} till {returnLocationName.split()[0]}  {latestReturnfrmt}! Boka senast {expireTimefrmt}."""
-
-        # Header/subject for car ad for delivery
-        delivery_header = f"""Ny bil från Stockholm till Skåne {latestReturnfrmt}! Boka senast {expireTimefrmt}."""
-
-        # Email body, with formated datetime objects to not
-        email = f"""Det finns en {carModel} att köra från {pickupLocationName} till {returnLocationName} som är tillgänglig mellan {availableAtfrmt} och {latestReturnfrmt}. Extra tid beräkad är {round(travelTime - originalTravelTime, 1)} minuter och extra sträcka är {round(distance - originalDistance, 1)} km. \n\nAnnonsen går ut {expireTimefrmt}.\n\nVisit at https://www.hertzfreerider.se/sv-se/."""
-
         # If we have already processed this ad, dont bother checking again
-        ids_formatted = ",".join(ids).replace("\n", "")  # since ids list is \n separated 'in' will not work since every input has trailing \n
+        ids_formatted = ",".join(ids).replace("\n",
+                                              "")  # since ids list is \n separated 'in' will not work since every input has trailing \n
         if str(ad_id) in ids_formatted:
             print("Ad with id:", ad_id, "already parsed, skipping...")
             continue
+
+        # Email body, with formated datetime objects to not
+        msg, default_subject, delivery_subject = create_html_mail(ad)
 
         # Check if the specified locations exist in the posted pickup/return locations. Use any to check for any words in the list are present in the posted string.
         if (any(loc in pickupLocationName.lower() for loc in interested_pickup_locs_delivery) and any(
                 loc in returnLocationName.lower() for loc in
                 interested_return_locs_delivery)):
             # Send email with delivery header
-            send_mail(delivery_header, email)
+            msg['Subject'] = delivery_subject
+            send_mail(msg.as_string())
             counter += 1
 
-        # Dont allow where pickup and return is in the same region
+            # Dont allow where pickup and return is in the same region
         elif (any(loc in pickupLocationName.lower() for loc in interested_pickup_locs) and not any(
                 loc in returnLocationName.lower() for loc in uninterested_return_locs)):
             # Send email with generic header
-            send_mail(default_header, email)
+            msg['Subject'] = default_subject
+            send_mail(msg.as_string())
             counter += 1
 
         else:
             print("Uninteresting ad, skipping...")
+
         # add parsed id to file
         with open(f"{PROJECT_DIR}/ids.txt", "a+") as file:
             file.write(str(ad_id) + "\n")
@@ -214,8 +167,6 @@ def send_mails(objects):
 
 
 def main():
-    # Load all the environment variables and override in case there are old variables i dont want to keep
-    load_dotenv(override=True)
     response_json = scrape()
     parsed_data = parse(response_json)
     send_mails(parsed_data)
@@ -228,7 +179,7 @@ def get_time():
     return current_time
 
 
-def send_mail(header, content):
+def send_mail(message):
     # Setup and send mail
     receiver_email = os.getenv("receiver_email")
     port = 465  # For SSL
@@ -236,22 +187,118 @@ def send_mail(header, content):
     # use environment variables for email login
     sender_email = os.getenv("sender_email")
     password = os.getenv("password")
-    message = f"""\
-Subject: {header}
 
-{content}"""
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-
         print("Logging in!", get_time())
         server.login(sender_email, password)
 
         print("Sending mail", get_time())
-        server.sendmail(sender_email, receiver_email, message.encode("utf-8"))
+        server.sendmail(sender_email, receiver_email, message)
 
         print("Mail sent!", get_time())
         print()
 
 
+def create_html_mail(ad):
+    # Create message container - the correct MIME type is multipart/alternative.
+    msg = MIMEMultipart('alternative')
+    #msg['From'] = sender_email
+    #msg['To'] = receiver_email
+
+    distance = ad["distance"]
+    originalDistance = ad["originalDistance"]
+    travelTime = ad["travelTime"]
+    originalTravelTime = ad["originalTravelTime"]
+
+    carModel = ad["carModel"]
+    availableAtfrmt = ad["availableAtfrmt"]
+    latestReturnfrmt = ad["latestReturnfrmt"]
+    expireTimefrmt = ad["expireTimefrmt"]
+    returnLocationName = ad["returnLocationName"]
+    pickupLocationName = ad["pickupLocationName"]
+
+    # Header/subject for generic car ad
+    default_header = f"""Ny bil från {pickupLocationName.split()[0]} till {returnLocationName.split()[0]}  {latestReturnfrmt}! Boka senast {expireTimefrmt}."""
+
+    # Header/subject for car ad for delivery
+    delivery_header = f"""Ny bil från Stockholm till Skåne {latestReturnfrmt}! Boka senast {expireTimefrmt}."""
+
+    # Create the body of the message (a plain-text and an HTML version).
+    plain_text = f"""Det finns en {carModel} att köra från {pickupLocationName} till {returnLocationName} som är tillgänglig mellan {availableAtfrmt} och {latestReturnfrmt}. Extra tid beräkad är {round(travelTime - originalTravelTime, 1)} minuter och extra sträcka är {round(distance - originalDistance, 1)} km. \n\nAnnonsen går ut {expireTimefrmt}.\n\nVisit at https://www.hertzfreerider.se/sv-se/."""
+    html_text = f"""
+        <meta charset="UTF-8">
+        <head>
+            <body>
+                <p>
+                    Det finns en
+                    <ul>
+                        <li>
+                            <b>{carModel}</b> att köra från
+                        </li>
+                        <li>
+                            <b>{pickupLocationName}</b> till
+                        </li>
+                        <li>
+                            <b>{returnLocationName}</b> som är tillgänglig mellan
+                        </li>
+                        <li>
+                             <b>{availableAtfrmt}</b> och <b>{latestReturnfrmt}</b>.
+                        </li>
+                        <li>
+                            Extra tid beräkad är <b>{round(travelTime - originalTravelTime, 1)}</b> och extra sträcka är <b>{round(distance - originalDistance, 1)}</b>.
+                        </li>
+                    </ul>
+                    <br>
+                    Annonsen går ut {expireTimefrmt}.<br><br><br>
+                    Visit at <a href="https://www.hertzfreerider.se/sv-se/">https://www.hertzfreerider.se/sv-se/</a>.
+                </p>
+            </body>
+        </head>"""
+
+    # Record the MIME types of both parts - text/plain and text/html.
+    part1 = MIMEText(plain_text, 'plain')
+    part2 = MIMEText(html_text, 'html')
+
+    # Attach parts into message container.
+    # According to RFC 2046, the last part of a multipart message, in this case
+    # the HTML message, is best and preferred.
+    msg.attach(part1)
+    msg.attach(part2)
+
+    # This should be sent
+    return msg, default_header, delivery_header
+
+
 if __name__ == "__main__":
+    # Load all the environment variables and override in case there are old variables i dont want to keep
+    load_dotenv(override=True)
     main()
+
+
+def test_mail():
+    # code to test the mailing functionality
+
+    # test delivery mailing from stockholm -> lund
+    test_delivery = {
+        # Origin and destination names
+        "returnLocationName": "Lund",
+        "pickupLocationName": "Stockholm",
+
+        # Get all the relevant data from the json that we want to include in our mail
+        "ad_id": 7777777,
+        "distance": 150,
+        "originalDistance":  100,
+        "travelTime": 50,
+        "originalTravelTime": 25,
+
+        "carModel": "model",
+
+        # date from source is on ISO-format "YYYY-MM-DDTHH:mm:ss"
+        "availableAtfrmt": "date1",
+        "latestReturnfrmt": "date2",
+        "expireTimefrmt": "date3"
+    }
+
+    send_mails()
+
